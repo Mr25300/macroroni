@@ -1,7 +1,7 @@
 import time
 import threading
 import uuid
-from enum import Enum
+from enum import Enum, auto
 from dataclasses import dataclass
 
 from pynput import mouse, keyboard
@@ -18,8 +18,8 @@ class MacroStep:
     duration: int = 0
 
 class TriggerMode(Enum):
-    TOGGLE = 0
-    HOLD = 1
+    TOGGLE = auto()
+    HOLD = auto()
 
 @dataclass
 class ProfileTrigger:
