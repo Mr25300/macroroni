@@ -47,6 +47,8 @@ class MacroProfile:
 
     def _run_loop(self) -> None:
         repeat_num = 0
+        m_active: set[mouse.Button] = set()
+        k_active: set[keyboard.Key | keyboard.KeyCode] = set()
 
         while self._running_event.is_set():
             if self.repeat_count > 0 and repeat_num >= self.repeat_count:
@@ -60,19 +62,29 @@ class MacroProfile:
                     pass
                 elif type(step.output_id) == mouse.Button:
                     if step.output_mode:
+                        m_active.add(step.output_id)
                         m_controller.press(step.output_id)
                     else:
+                        m_active.remove(step.output_id)
                         m_controller.release(step.output_id)
                 else:
                     if step.output_mode:
+                        k_active.add(step.output_id)
                         k_controller.press(step.output_id)
                     else:
+                        k_active.remove(step.output_id)
                         k_controller.release(step.output_id)
 
                 if step.duration > 0:
                     time.sleep(step.duration / 1000)
 
             repeat_num += 1
+
+        for k_id in m_active:
+            m_controller.release(k_id)
+
+        for k_id in k_active:
+            k_controller.release(k_id)
 
         self._running_event.clear()
 
@@ -91,8 +103,8 @@ class MacroProfile:
 
         self._running_event.clear()
 
-        # if self._thread and self._thread.is_alive():
-        #     self._thread.join()
+        if self._thread and self._thread.is_alive():
+            self._thread.join()
 
     def toggle(self) -> None:
         if self._running_event.is_set():
@@ -126,8 +138,6 @@ class MacroManager:
         k_listener.start()
 
     def handle_input(self, input_id: IOIdentifier, input_mode: bool) -> None:
-        print(input_id, input_mode)
-
         if input_id is None:
             return
 
