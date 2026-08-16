@@ -9,7 +9,7 @@ from pynput import mouse, keyboard
 m_controller = mouse.Controller()
 k_controller = keyboard.Controller()
 
-IOIdentifier = mouse.Button | keyboard.Key | keyboard.KeyCode | str | None
+IOIdentifier = mouse.Button | keyboard.Key | keyboard.KeyCode | None
 
 @dataclass
 class MacroStep:
@@ -32,14 +32,13 @@ class MacroProfile:
     repeat_count: int
     trigger: ProfileTrigger | None
 
-    _active: bool
     _running_event: threading.Event
     _thread: threading.Thread | None
 
     def __init__(self, uid: str) -> None:
         self.uid = uid
         self.steps = []
-        self.repeat_count = 1
+        self.repeat_count = -1
         self.trigger = None
 
         self._active = False
@@ -49,7 +48,10 @@ class MacroProfile:
     def _run_loop(self) -> None:
         repeat_num = 0
 
-        while repeat_num < self.repeat_count and self._running_event.is_set():
+        while self._running_event.is_set():
+            if self.repeat_count > 0 and repeat_num >= self.repeat_count:
+                break
+
             for step in self.steps:
                 if not self._running_event.is_set():
                     break
@@ -72,28 +74,28 @@ class MacroProfile:
 
             repeat_num += 1
 
+        self._running_event.clear()
+
     def run(self) -> None:
-        if self._active:
+        if self._running_event.is_set():
             return
 
-        self._active = True
         self._running_event.set()
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
-        if not self._active:
+        if not self._running_event.is_set():
             return
 
-        self._active = False
         self._running_event.clear()
 
-        if self._thread and self._thread.is_alive():
-            self._thread.join()
+        # if self._thread and self._thread.is_alive():
+        #     self._thread.join()
 
     def toggle(self) -> None:
-        if self._active:
+        if self._running_event.is_set():
             self.stop()
         else:
             self.run()
@@ -105,7 +107,8 @@ class MacroManager:
 
     def __init__(self) -> None:
         self.profiles = {}
-        self._active_input = set()
+
+        self._active_inputs = set()
 
         def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
             self.handle_input(key, True)
@@ -123,13 +126,17 @@ class MacroManager:
         k_listener.start()
 
     def handle_input(self, input_id: IOIdentifier, input_mode: bool) -> None:
+        print(input_id, input_mode)
+
         if input_id is None:
             return
 
+        first_press = input_mode and input_id not in self._active_inputs
+
         if input_mode:
-            self._active_input.add(input_id)
-        else:
-            self._active_input.remove(input_id)
+            self._active_inputs.add(input_id)
+        elif input_id in self._active_inputs:
+            self._active_inputs.remove(input_id)
 
         for profile in self.profiles.values():
             if profile.trigger is None:
@@ -139,7 +146,7 @@ class MacroManager:
             trig_mode = profile.trigger.mode
 
             if trig_mode == TriggerMode.TOGGLE:
-                if input_id in trig_inputs and trig_inputs.issubset(self._active_inputs):
+                if first_press and input_id in trig_inputs and trig_inputs.issubset(self._active_inputs):
                     profile.toggle()
             else:
                 if trig_inputs.issubset(self._active_inputs):
