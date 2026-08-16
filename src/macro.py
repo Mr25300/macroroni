@@ -1,6 +1,5 @@
 import time
 import threading
-from typing import IO
 import uuid
 from enum import Enum
 from dataclasses import dataclass
@@ -10,11 +9,6 @@ from pynput import mouse, keyboard
 m_controller = mouse.Controller()
 k_controller = keyboard.Controller()
 
-class MacroStepType(Enum):
-    BLANK = 0
-    MOUSE = 1
-    KEYBOARD = 2
-
 IOIdentifier = mouse.Button | keyboard.Key | keyboard.KeyCode | str | None
 
 @dataclass
@@ -23,11 +17,22 @@ class MacroStep:
     output_mode: bool = True
     duration: int = 0
 
+class TriggerMode(Enum):
+    TOGGLE = 0
+    HOLD = 1
+
+@dataclass
+class ProfileTrigger:
+    inputs: set[IOIdentifier]
+    mode: TriggerMode
+
 class MacroProfile:
     uid: str
     steps: list[MacroStep]
     repeat_count: int
+    trigger: ProfileTrigger | None
 
+    _active: bool
     _running_event: threading.Event
     _thread: threading.Thread | None
 
@@ -35,6 +40,9 @@ class MacroProfile:
         self.uid = uid
         self.steps = []
         self.repeat_count = 1
+        self.trigger = None
+
+        self._active = False
         self._running_event = threading.Event()
         self._thread = None
 
@@ -65,33 +73,35 @@ class MacroProfile:
             repeat_num += 1
 
     def run(self) -> None:
+        if self._active:
+            return
+
+        self._active = True
         self._running_event.set()
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
+        if not self._active:
+            return
+
+        self._active = False
         self._running_event.clear()
 
         if self._thread and self._thread.is_alive():
             self._thread.join()
 
-class ProfileBindMode(Enum):
-    TOGGLE = 0
-    HOLD = 1
-    START_STOP = 2
-
-@dataclass
-class ProfileBind:
-    uid: str
-    mode: ProfileBindMode
-    start_keys: set[IOIdentifier]
-    stop_keys: set[IOIdentifier] | None = None
+    def toggle(self) -> None:
+        if self._active:
+            self.stop()
+        else:
+            self.run()
 
 class MacroManager:
     profiles: dict[str, MacroProfile]
 
-    _active_input: set[IOIdentifier]
+    _active_inputs: set[IOIdentifier]
 
     def __init__(self) -> None:
         self.profiles = {}
@@ -121,7 +131,21 @@ class MacroManager:
         else:
             self._active_input.remove(input_id)
 
+        for profile in self.profiles.values():
+            if profile.trigger is None:
+                continue
 
+            trig_inputs = profile.trigger.inputs
+            trig_mode = profile.trigger.mode
+
+            if trig_mode == TriggerMode.TOGGLE:
+                if input_id in trig_inputs and trig_inputs.issubset(self._active_inputs):
+                    profile.toggle()
+            else:
+                if trig_inputs.issubset(self._active_inputs):
+                    profile.run()
+                else:
+                    profile.stop()
 
     def create_profile(self) -> MacroProfile:
         uid = str(uuid.uuid4())
