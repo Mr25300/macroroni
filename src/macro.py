@@ -4,17 +4,11 @@ import uuid
 from enum import Enum, auto
 from dataclasses import dataclass
 
-from pynput import mouse, keyboard
-
-m_controller = mouse.Controller()
-k_controller = keyboard.Controller()
-
-IOIdentifier = mouse.Button | keyboard.Key | keyboard.KeyCode | None
+from io_backend import IOBackend
 
 @dataclass
 class MacroStep:
-    output_id: IOIdentifier
-    output_mode: bool = True
+    output_info: list[tuple[str, bool]]
     duration: int = 0
 
 class TriggerMode(Enum):
@@ -23,10 +17,12 @@ class TriggerMode(Enum):
 
 @dataclass
 class ProfileTrigger:
-    inputs: set[IOIdentifier]
+    inputs: set[str]
     mode: TriggerMode
 
 class MacroProfile:
+    backend: IOBackend
+
     uid: str
     steps: list[MacroStep]
     repeat_count: int
@@ -35,7 +31,9 @@ class MacroProfile:
     _running_event: threading.Event
     _thread: threading.Thread | None
 
-    def __init__(self, uid: str) -> None:
+    def __init__(self, backend: IOBackend, uid: str) -> None:
+        self.backend = backend
+
         self.uid = uid
         self.steps = []
         self.repeat_count = -1
@@ -47,8 +45,7 @@ class MacroProfile:
 
     def _run_loop(self) -> None:
         repeat_num = 0
-        m_active: set[mouse.Button] = set()
-        k_active: set[keyboard.Key | keyboard.KeyCode] = set()
+        active: set[str] = set()
 
         while self._running_event.is_set():
             if self.repeat_count > 0 and repeat_num >= self.repeat_count:
@@ -58,33 +55,23 @@ class MacroProfile:
                 if not self._running_event.is_set():
                     break
 
-                if step.output_id is None:
-                    pass
-                elif type(step.output_id) == mouse.Button:
-                    if step.output_mode:
-                        m_active.add(step.output_id)
-                        m_controller.press(step.output_id)
+                for out_id, out_mode in step.output_info:
+                    if out_mode:
+                        active.add(out_id)
+                        self.backend.press(out_id)
                     else:
-                        m_active.remove(step.output_id)
-                        m_controller.release(step.output_id)
-                else:
-                    if step.output_mode:
-                        k_active.add(step.output_id)
-                        k_controller.press(step.output_id)
-                    else:
-                        k_active.remove(step.output_id)
-                        k_controller.release(step.output_id)
+                        if out_id in active:
+                            active.remove(out_id)
+
+                        self.backend.release(out_id)
 
                 if step.duration > 0:
                     time.sleep(step.duration / 1000)
 
             repeat_num += 1
 
-        for k_id in m_active:
-            m_controller.release(k_id)
-
-        for k_id in k_active:
-            k_controller.release(k_id)
+        for out_id in active:
+            self.backend.release(out_id)
 
         self._running_event.clear()
 
@@ -113,40 +100,26 @@ class MacroProfile:
             self.run()
 
 class MacroManager:
+    backend: IOBackend
     profiles: dict[str, MacroProfile]
 
-    _active_inputs: set[IOIdentifier]
+    _active_inputs: set[str]
 
-    def __init__(self) -> None:
+    def __init__(self, backend: IOBackend) -> None:
+        self.backend = backend
         self.profiles = {}
 
         self._active_inputs = set()
 
-        def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
-            self.handle_input(key, True)
+        backend.listen(self.handle_input)
 
-        def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> None:
-            self.handle_input(key, False)
+    def handle_input(self, in_id: str, in_mode: bool) -> None:
+        first_press = in_mode and in_id not in self._active_inputs
 
-        def on_click(x: int, y: int, button: mouse.Button, pressed: bool) -> None:
-            self.handle_input(button, pressed)
-
-        m_listener = mouse.Listener(on_click=on_click)
-        k_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-
-        m_listener.start()
-        k_listener.start()
-
-    def handle_input(self, input_id: IOIdentifier, input_mode: bool) -> None:
-        if input_id is None:
-            return
-
-        first_press = input_mode and input_id not in self._active_inputs
-
-        if input_mode:
-            self._active_inputs.add(input_id)
-        elif input_id in self._active_inputs:
-            self._active_inputs.remove(input_id)
+        if in_mode:
+            self._active_inputs.add(in_id)
+        elif in_id in self._active_inputs:
+            self._active_inputs.remove(in_id)
 
         for profile in self.profiles.values():
             if profile.trigger is None:
@@ -156,7 +129,7 @@ class MacroManager:
             trig_mode = profile.trigger.mode
 
             if trig_mode == TriggerMode.TOGGLE:
-                if first_press and input_id in trig_inputs and trig_inputs.issubset(self._active_inputs):
+                if first_press and in_id in trig_inputs and trig_inputs.issubset(self._active_inputs):
                     profile.toggle()
             else:
                 if trig_inputs.issubset(self._active_inputs):
@@ -170,7 +143,7 @@ class MacroManager:
         while uid in self.profiles:
             uid = str(uuid.uuid4())
 
-        profile = MacroProfile(uid)
+        profile = MacroProfile(self.backend, uid)
         self.profiles[uid] = profile
 
         return profile

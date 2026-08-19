@@ -2,115 +2,102 @@ from typing import cast, Callable
 
 from pynput import mouse, keyboard
 
-from io_backend import IOBackend, IOId
+from io_backend import IOBackend, IOCallback
 
-PYNPUT_MAP = {
-    IOId.KEY_LSHIFT: keyboard.Key.shift_l,
-    IOId.KEY_RSHIFT: keyboard.Key.shift_r,
-    IOId.KEY_LCTRL: keyboard.Key.ctrl_l,
-    IOId.KEY_RCTRL: keyboard.Key.ctrl_r,
-    IOId.KEY_LALT: keyboard.Key.alt_l,
-    IOId.KEY_RALT: keyboard.Key.alt_r,
-    IOId.KEY_LMETA: keyboard.Key.cmd_l,
-    IOId.KEY_RMETA: keyboard.Key.cmd_r,
+def pynput_to_id(pynput_id: mouse.Button | keyboard.Key | keyboard.KeyCode | None) -> str | None:
+    if isinstance(pynput_id, mouse.Button):
+        return f"m_{pynput_id.name}"
+    elif isinstance(pynput_id, keyboard.Key):
+        return f"k_{pynput_id.name}"
+    elif isinstance(pynput_id, keyboard.KeyCode):
+        if pynput_id.char is not None:
+            return f"kc_{pynput_id.char}"
+        elif pynput_id.vk is not None:
+            return f"kv_{pynput_id.vk}"
 
-    IOId.KEY_BACKSPACE: keyboard.Key.backspace,
-    IOId.KEY_TAB: keyboard.Key.tab,
-    IOId.KEY_CAPSLOCK: keyboard.Key.caps_lock,
-    IOId.KEY_ENTER: keyboard.Key.enter,
-    IOId.KEY_KP_ENTER: keyboard.Key.enter,
-    IOId.KEY_KP_NUMLOCK: keyboard.Key.num_lock,
-    IOId.KEY_SPACE: keyboard.Key.space,
+    return None
 
-    IOId.KEY_INSERT: keyboard.Key.insert,
-    IOId.KEY_DELETE: keyboard.Key.delete,
-    IOId.KEY_HOME: keyboard.Key.home,
-    IOId.KEY_END: keyboard.Key.end,
-    IOId.KEY_PAGEUP: keyboard.Key.page_up,
-    IOId.KEY_PAGEDOWN: keyboard.Key.page_down,
+def id_to_pynput(io_id: str | None) -> mouse.Button | keyboard.Key | keyboard.KeyCode | None:
+    if io_id is None:
+        return None
 
-    IOId.KEY_UP: keyboard.Key.up,
-    IOId.KEY_DOWN: keyboard.Key.down,
-    IOId.KEY_LEFT: keyboard.Key.left,
-    IOId.KEY_RIGHT: keyboard.Key.right,
+    if io_id.startswith("m_"):
+        return getattr(mouse.Button, io_id.removeprefix("m_"))
+    elif io_id.startswith("k_"):
+        return getattr(keyboard.Key, io_id.removeprefix("k_"))
+    elif io_id.startswith("kc_"):
+        return keyboard.KeyCode.from_char(io_id.removeprefix("kc_"))
+    elif io_id.startswith("kv_"):
+        try:
+            return keyboard.KeyCode.from_vk(int(io_id.removeprefix("kv_")))
+        except Exception:
+            pass
 
-    IOId.KEY_ESC: keyboard.Key.esc,
-    IOId.KEY_PRINT_SCREEN: keyboard.Key.print_screen,
-    IOId.KEY_SCROLL_LOCK: keyboard.Key.scroll_lock,
-    IOId.KEY_PAUSE: keyboard.Key.pause,
+    return None
 
-    IOId.KEY_F1: keyboard.Key.f1,
-    IOId.KEY_F2: keyboard.Key.f2,
-    IOId.KEY_F3: keyboard.Key.f3,
-    IOId.KEY_F4: keyboard.Key.f4,
-    IOId.KEY_F5: keyboard.Key.f5,
-    IOId.KEY_F6: keyboard.Key.f6,
-    IOId.KEY_F7: keyboard.Key.f7,
-    IOId.KEY_F8: keyboard.Key.f8,
-    IOId.KEY_F9: keyboard.Key.f9,
-    IOId.KEY_F10: keyboard.Key.f10,
-    IOId.KEY_F11: keyboard.Key.f11,
-    IOId.KEY_F12: keyboard.Key.f12,
-    IOId.KEY_F13: keyboard.Key.f13,
-    IOId.KEY_F14: keyboard.Key.f14,
-    IOId.KEY_F15: keyboard.Key.f15,
-    IOId.KEY_F16: keyboard.Key.f16,
-    IOId.KEY_F17: keyboard.Key.f17,
-    IOId.KEY_F18: keyboard.Key.f18,
-    IOId.KEY_F19: keyboard.Key.f19,
-    IOId.KEY_F20: keyboard.Key.f20,
-
-    IOId.KEY_VOLUME_MUTE: keyboard.Key.media_volume_mute,
-    IOId.KEY_VOLUME_DOWN: keyboard.Key.media_volume_down,
-    IOId.KEY_VOLUME_UP: keyboard.Key.media_volume_up,
-    IOId.KEY_MEDIA_NEXT: keyboard.Key.media_next,
-    IOId.KEY_MEDIA_PREV: keyboard.Key.media_previous,
-    IOId.KEY_MEDIA_STOP: keyboard.Key.media_stop,
-    IOId.KEY_MEDIA_PLAY_PAUSE: keyboard.Key.media_play_pause,
-
-    IOId.MOUSE_LEFT: mouse.Button.left,
-    IOId.MOUSE_RIGHT: mouse.Button.right,
-    IOId.MOUSE_MIDDLE: mouse.Button.middle,
-    IOId.MOUSE_X1: mouse.Button.button8,
-    IOId.MOUSE_X2: mouse.Button.button9
-}
-
-PYNPUT_MAP_INV = {PYNPUT_MAP[key]: key for key in PYNPUT_MAP}
-PYNPUT_CHAR_MAP_INV: dict[str, IOId] = {member.value: member for member in IOId if type(member.value) == str}
-
-def toPynput(io_id: IOId) -> mouse.Button | keyboard.Key | keyboard.KeyCode:
-    if io_id in PYNPUT_MAP:
-        return PYNPUT_MAP[io_id]
-    else:
-        return keyboard.KeyCode.from_char(cast(str, io_id.value))
-
-def fromPynput(pynput_id: mouse.Button | keyboard.Key | keyboard.KeyCode) -> IOId:
-    if type(pynput_id) == keyboard.KeyCode:
-        return PYNPUT_CHAR_MAP_INV[cast(str, pynput_id.char)]
-    else:
-        return PYNPUT_MAP_INV[pynput_id]
-
-class PynputBackend(IOBackend):
+class IOWinMac(IOBackend):
     m_controller: mouse.Controller
     k_controller: keyboard.Controller
     m_listener: mouse.Listener
     k_listener: keyboard.Listener
 
+    _callback: IOCallback | None
+
     def __init__(self) -> None:
         self.m_controller = mouse.Controller()
         self.k_controller = keyboard.Controller()
-        self.m_listener = mouse.Listener()
-        self.k_listener = keyboard.Listener()
 
-    def press(self, out_id: IOId) -> None:
-        pynput_id = toPynput(out_id)
+        def on_click(x: int, y: int, button: mouse.Button, pressed: bool) -> None:
+            if self._callback is not None:
+                self._callback(cast(str, pynput_to_id(button)), pressed)
 
-        pass
+        def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
+            if self._callback is not None:
+                out_id = pynput_to_id(key)
 
-    def release(self, out_id: IOId) -> None:
-        pynput_id = toPynput(out_id)
+                print(out_id)
 
-        pass
+                if out_id is not None:
+                    self._callback(out_id, True)
 
-    def listen(self, callback: Callable[[IOId, bool], None]) -> None:
-        pass
+        def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> None:
+            if self._callback is not None:
+                out_id = pynput_to_id(key)
+
+                print(out_id)
+
+                if out_id is not None:
+                    self._callback(out_id, False)
+
+        self.m_listener = mouse.Listener(on_click=on_click)
+        self.k_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+
+        self.m_listener.start()
+        self.k_listener.start()
+
+        self._callback = None
+
+    def press(self, out_id: str) -> None:
+        pynput_id = id_to_pynput(out_id)
+
+        if pynput_id is None:
+            return
+
+        if isinstance(pynput_id, mouse.Button):
+            self.m_controller.press(pynput_id)
+        else:
+            self.k_controller.press(cast(keyboard.Key | keyboard.KeyCode, pynput_id))
+
+    def release(self, out_id: str) -> None:
+        pynput_id = id_to_pynput(out_id)
+
+        if pynput_id is None:
+            return
+
+        if isinstance(pynput_id, mouse.Button):
+            self.m_controller.release(pynput_id)
+        else:
+            self.k_controller.release(cast(keyboard.Key | keyboard.KeyCode, pynput_id))
+
+    def listen(self, callback: IOCallback) -> None:
+        self._callback = callback
