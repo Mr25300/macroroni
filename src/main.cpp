@@ -2,15 +2,45 @@
 #include "io_linux.hpp"
 
 int main() {
+#if defined(__linux__)
     LinuxIOController io_control{};
+#else
+    #error "Unsupported platform"
+#endif
 
     Macro macro{io_control, {
-        {{1, 30, 1}, 1000}, // Press "a"
-        {{1, 30, 0}, 2000}, // Release "a"
-        {{1, 48, 1}, 2000}, // Press "b"
-        {{1, 46, 1}, 2000}, // Press "c"
-        {{1, 48, 1}, 3000}, // Release "b"
-        {{1, 46, 1}, 3000} // Release "c"
+        {{1, 42, 1}, 1000}, // Press shift
+        {{1, 35, 1}, 1000}, // Press "h"
+        {{1, 35, 0}, 1000}, // Release "h"
+        {{1, 18, 1}, 1000}, // Press "e"
+        {{1, 18, 0}, 1000}, // Release "e"
+        {{1, 38, 1}, 1000}, // Press "l"
+        {{1, 38, 0}, 1000}, // Release "l"
+        {{1, 38, 1}, 1000}, // Press "l"
+        {{1, 38, 0}, 1000}, // Release "l"
+        {{1, 24, 1}, 1000}, // Press "o"
+        {{1, 24, 0}, 1000}, // Release "o"
+        {{1, 35, 1}, 1000}, // Press "h"
+        {{1, 35, 0}, 1000}, // Release "h"
+        {{1, 18, 1}, 1000}, // Press "e"
+        {{1, 18, 0}, 1000}, // Release "e"
+        {{1, 38, 1}, 1000}, // Press "l"
+        {{1, 38, 0}, 1000}, // Release "l"
+        {{1, 38, 1}, 1000}, // Press "l"
+        {{1, 38, 0}, 1000}, // Release "l"
+        {{1, 24, 1}, 1000}, // Press "o"
+        {{1, 24, 0}, 1000}, // Release "o"
+        {{1, 35, 1}, 1000}, // Press "h"
+        {{1, 35, 0}, 1000}, // Release "h"
+        {{1, 18, 1}, 1000}, // Press "e"
+        {{1, 18, 0}, 1000}, // Release "e"
+        {{1, 38, 1}, 1000}, // Press "l"
+        {{1, 38, 0}, 1000}, // Release "l"
+        {{1, 38, 1}, 1000}, // Press "l"
+        {{1, 38, 0}, 1000}, // Release "l"
+        {{1, 24, 1}, 1000}, // Press "o"
+        {{1, 24, 0}, 1000}, // Release "o"
+        {{1, 42, 1}, 1000} // Release shift
     }};
     macro.run();
 

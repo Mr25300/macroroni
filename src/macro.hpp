@@ -14,7 +14,7 @@ struct MacroAction {
 };
 
 class Macro {
-    IOController& io;
+    IOController& io_control;
     std::vector<MacroAction> actions{};
 
     uint64_t next_id{};
@@ -23,9 +23,9 @@ class Macro {
 
 public:
     Macro(IOController& io, std::vector<MacroAction> init_actions)
-        : io(io), actions(std::move(init_actions))
+        : io_control(io), actions(std::move(init_actions))
     {
-        std::sort(actions.begin(), actions.end(), [](const MacroAction& a, const MacroAction& b) {
+        std::stable_sort(actions.begin(), actions.end(), [](const MacroAction& a, const MacroAction& b) {
             return a.time_ms < b.time_ms;
         });
 
@@ -34,7 +34,7 @@ public:
         }
     }
 
-    void add_action(MacroAction& action) {
+    void add_action(MacroAction action) {
         action.id = next_id++;
 
         std::vector<MacroAction>::iterator it = std::upper_bound(
@@ -44,7 +44,7 @@ public:
             }
         );
 
-        actions.insert(it, action);
+        actions.insert(it, std::move(action));
     }
 
     void run() {
@@ -78,12 +78,12 @@ public:
             MacroAction& action = actions[action_index];
 
             if (time_ms >= action.time_ms) {
-                std::cout << action.out_info.code << '\n';
+                io_control.execute(action.out_info);
 
                 ++action_index;
 
                 if (action_index >= actions.size()) {
-                    action_index = 0;
+                    stop();
 
                     break;
                 }
