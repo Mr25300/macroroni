@@ -1,10 +1,12 @@
 #include "io.hpp"
+#include "timer.hpp"
 
 #include <cstdint>
 #include <vector>
 #include <algorithm>
 #include <chrono>
 #include <thread>
+
 #include <iostream>
 
 struct MacroAction {
@@ -16,14 +18,14 @@ struct MacroAction {
 class Macro {
     IOController& io_control;
     std::vector<MacroAction> actions{};
+    size_t loop_count{};
 
-    uint64_t next_id{};
+    uint32_t next_id{};
     bool running{};
-    size_t action_index{};
 
 public:
-    Macro(IOController& io, std::vector<MacroAction> init_actions)
-        : io_control(io), actions(std::move(init_actions))
+    Macro(IOController& io, size_t loops, std::vector<MacroAction> init_actions)
+        : io_control{io}, actions{std::move(init_actions)}, loop_count{loops}
     {
         std::stable_sort(actions.begin(), actions.end(), [](const MacroAction& a, const MacroAction& b) {
             return a.time_ms < b.time_ms;
@@ -34,9 +36,7 @@ public:
         }
     }
 
-    void add_action(MacroAction action) {
-        action.id = next_id++;
-
+    uint32_t add_action(MacroAction action) {
         std::vector<MacroAction>::iterator it = std::upper_bound(
             actions.begin(), actions.end(), action,
             [](const MacroAction& a, const MacroAction& b) {
@@ -45,57 +45,66 @@ public:
         );
 
         actions.insert(it, std::move(action));
+
+        return action.id = next_id++;
+    }
+
+    void remove_action(uint32_t action_id) {
+        std::vector<MacroAction>::iterator it = std::find_if(
+            actions.begin(), actions.end(),
+            [action_id](const MacroAction& a) {
+                return a.id == action_id;
+            }
+        );
+
+        if (it != actions.end()) actions.erase(it);
     }
 
     void run() {
         if (running) return;
 
-        using std::chrono::steady_clock;
-        using std::chrono::time_point;
-        using std::chrono::milliseconds;
-        using std::chrono::microseconds;
-        using std::chrono::duration_cast;
-
         running = true;
 
-        time_point init_time = steady_clock::now();
-        microseconds wait_time{1000};
+        size_t action_index{};
+        size_t loop_num{};
 
-        while (running) {
-            time_point start_time = steady_clock::now();
-            uint64_t diff_time = duration_cast<milliseconds>(start_time - init_time).count();
+        size_t loop_time = actions.back().time_ms;
 
-            update(diff_time);
+        run_timer(1000, [&](uint64_t time_ms) {
+            if (!running) return false;
 
-            if (!running) break;
+            while (action_index < actions.size()) {
+                MacroAction& action = actions[action_index];
 
-            std::this_thread::sleep_for(wait_time);
-        }
-    }
+                if (time_ms % loop_time >= action.time_ms % loop_time) {
+                    std::cout << action.out_info.code << ' ' << action.out_info.value << '\n';
+                    // io_control.execute(action.out_info);
 
-    void update(uint64_t time_ms) {
-        while (true) {
-            MacroAction& action = actions[action_index];
+                    ++action_index;
 
-            if (time_ms >= action.time_ms) {
-                io_control.execute(action.out_info);
-
-                ++action_index;
-
-                if (action_index >= actions.size()) {
-                    stop();
-
+                } else {
                     break;
                 }
-
-            } else {
-                break;
             }
-        }
+
+            if (action_index >= actions.size()) {
+                ++loop_num;
+
+                if (loop_count == 0 || loop_num < loop_count) {
+                    action_index = 0;
+
+                } else {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+
+        running = false;
     }
 
     void stop() {
         running = false;
-        action_index = 0;
     }
 };
