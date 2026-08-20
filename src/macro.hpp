@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
-#include <chrono>
-#include <thread>
 
 #include <iostream>
 
@@ -68,33 +66,36 @@ public:
         size_t action_index{};
         size_t loop_num{};
 
-        size_t loop_time = actions.back().time_ms;
+        uint64_t loop_time = static_cast<int64_t>(actions.back().time_ms);
 
         run_timer(1000, [&](uint64_t time_ms) {
             if (!running) return false;
 
-            while (action_index < actions.size()) {
-                MacroAction& action = actions[action_index];
+            while (true) {
+                uint64_t curr_time_ms = static_cast<int64_t>(time_ms) - loop_num * loop_time;
 
-                if (time_ms % loop_time >= action.time_ms % loop_time) {
-                    std::cout << action.out_info.code << ' ' << action.out_info.value << '\n';
-                    // io_control.execute(action.out_info);
+                while (action_index < actions.size()) {
+                    MacroAction& action = actions[action_index];
 
-                    ++action_index;
+                    if (curr_time_ms >= action.time_ms) {
+                        std::cout << action.out_info.code << ' ' << action.out_info.value << '\n';
+                        // io_control.execute(action.out_info);
+                        ++action_index;
+                    } else {
+                        break;
+                    }
+                }
 
+                if (action_index >= actions.size()) {
+                    ++loop_num;
+
+                    if (loop_count == 0 || loop_num < loop_count) {
+                        action_index = 0;
+                    } else {
+                        return false;
+                    }
                 } else {
                     break;
-                }
-            }
-
-            if (action_index >= actions.size()) {
-                ++loop_num;
-
-                if (loop_count == 0 || loop_num < loop_count) {
-                    action_index = 0;
-
-                } else {
-                    return false;
                 }
             }
 
