@@ -17,13 +17,14 @@ class Macro {
     IOController& io_control;
     std::vector<MacroAction> actions{};
     size_t loop_count{};
+    uint64_t loop_delay{};
 
     uint32_t next_id{};
     bool running{};
 
 public:
-    Macro(IOController& io, size_t loops, std::vector<MacroAction> init_actions)
-        : io_control{io}, actions{std::move(init_actions)}, loop_count{loops}
+    Macro(IOController& io, size_t loops, uint64_t delay_ms, std::vector<MacroAction> init_actions)
+        : io_control{io}, actions{std::move(init_actions)}, loop_count{loops}, loop_delay{delay_ms}
     {
         std::stable_sort(actions.begin(), actions.end(), [](const MacroAction& a, const MacroAction& b) {
             return a.time_ms < b.time_ms;
@@ -66,13 +67,14 @@ public:
         size_t action_index{};
         size_t loop_num{};
 
-        uint64_t loop_time = static_cast<int64_t>(actions.back().time_ms);
+        uint64_t last_time = actions.back().time_ms;
+        uint64_t loop_time = last_time + loop_delay;
 
         run_timer(1000, [&](uint64_t time_ms) {
             if (!running) return false;
 
             while (true) {
-                uint64_t curr_time_ms = static_cast<int64_t>(time_ms) - loop_num * loop_time;
+                uint64_t curr_time_ms = time_ms - loop_num * loop_time;
 
                 while (action_index < actions.size()) {
                     MacroAction& action = actions[action_index];
@@ -86,7 +88,10 @@ public:
                     }
                 }
 
-                if (action_index >= actions.size()) {
+                if (
+                    curr_time_ms >= loop_time ||
+                    loop_num == loop_count - 1 && curr_time_ms >= last_time
+                ) {
                     ++loop_num;
 
                     if (loop_count == 0 || loop_num < loop_count) {
@@ -97,6 +102,19 @@ public:
                 } else {
                     break;
                 }
+
+                // // TODO: This isn't the right condition if there is a delay time between loops
+                // if (action_index >= actions.size()) {
+                //     ++loop_num;
+                //
+                //     if (loop_count == 0 || loop_num < loop_count) {
+                //         action_index = 0;
+                //     } else {
+                //         return false;
+                //     }
+                // } else {
+                //     break;
+                // }
             }
 
             return true;
