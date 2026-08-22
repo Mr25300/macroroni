@@ -126,8 +126,11 @@ public:
         }};
     }
 
+    bool is_running() { return running; }
+
     void stop() {
         if (!running) return;
+
         running = false;
 
         if (run_thread.joinable()) run_thread.join();

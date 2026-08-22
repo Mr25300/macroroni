@@ -9,9 +9,16 @@
 #include <sys/ioctl.h>
 #include <linux/uinput.h>
 #include <cstring>
+#include <filesystem>
+#include <poll.h>
+#include <thread>
+#include <atomic>
 
 class LinuxIOController : public IOController {
     int fd{-1};
+
+    std::atomic<bool> listening;
+    std::thread listen_thread;
 
 public:
     LinuxIOController() {
@@ -59,6 +66,65 @@ public:
         syn.code = SYN_REPORT;
         syn.value = 0;
         write(fd, &syn, sizeof(syn));
+    }
+
+    void listen(std::function<void(IOInfo input)> callback) {
+        if (listening) stop_listening();
+
+        listen_thread = std::thread([this, callback]() {
+            std::vector<pollfd> pfds;
+
+            std::filesystem::path input_dir = "/dev/input";
+            if (!std::filesystem::exists(input_dir)) return;
+
+            for (const auto& entry : std::filesystem::directory_iterator(input_dir)) {
+                if (entry.is_regular_file() || entry.is_character_file()) {
+                    std::string filename = entry.path().filename().string();
+                    if (filename.rfind("event", 0) != 0) continue;
+
+                    int fd = open(filename.c_str(), O_RDONLY);
+                    if (fd < 0) continue;
+
+                    pfds.push_back({fd, POLLIN, 0});
+
+                    // pfds.push_back({
+                    //     .fd = fd,
+                    //     .events = POLLIN,
+                    //     .revents = 0
+                    // });
+                }
+            }
+
+            while (listening) {
+                int timeout_ms = 100;
+                int ready = poll(pfds.data(), pfds.size(), timeout_ms);
+
+                if (ready < 0) {
+                    if (errno == EINTR) continue;
+                    else break;
+                }
+
+                if (ready == 0) continue;
+
+                for (size_t i{}; i < pfds.size(); ++i) {
+                    if (pfds[i].revents & POLLIN) {
+                        struct input_event ev{};
+                        ssize_t bytes_read = read(pfds[i].fd, &ev, sizeof(ev));
+
+                        if (bytes_read == sizeof(ev)) {
+                            callback({ev.type, ev.code, ev.value});
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    void stop_listening() {
+        if (!listening) return;
+
+        listening = false;
+        if (listen_thread.joinable()) listen_thread.join();
     }
 };
 

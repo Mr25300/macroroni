@@ -1,3 +1,5 @@
+#pragma once
+
 #include <chrono>
 #include <thread>
 
@@ -17,6 +19,8 @@ void run_timer(uint64_t interval, Callback&& callback) {
         uint64_t diff_time = duration_cast<milliseconds>(start_time - init_time).count();
 
         if (!callback(diff_time)) break;
+
+        // TODO: add correction for extra time callback and sleep_for take
 
         std::this_thread::sleep_for(interval_micro);
     }
